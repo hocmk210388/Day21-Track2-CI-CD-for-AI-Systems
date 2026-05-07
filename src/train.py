@@ -5,6 +5,7 @@ import yaml
 import json
 import joblib
 import os
+from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score
 
@@ -28,54 +29,55 @@ def train(
         accuracy (float): do chinh xac tren tap danh gia.
     """
 
-    # TODO 1: Doc du lieu huan luyen va danh gia
-    # df_train = ...
-    # df_eval  = ...
+    tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    mlflow.set_tracking_uri(tracking_uri)
 
-    # TODO 2: Tach dac trung (X) va nhan (y)
-    # X_train = df_train.drop(columns=["target"])
-    # y_train = ...
-    # X_eval  = ...
-    # y_eval  = ...
+    artifact_root = Path(os.getenv("MLFLOW_ARTIFACT_ROOT", "./mlartifacts")).resolve()
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    experiment_name = "wine-quality-local"
 
-    with mlflow.start_run():
+    client = mlflow.tracking.MlflowClient()
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        experiment_id = client.create_experiment(
+            experiment_name, artifact_location=artifact_root.as_uri()
+        )
+    else:
+        experiment_id = experiment.experiment_id
 
-        # TODO 3: Ghi nhan cac sieu tham so
-        # mlflow.log_params(...)
+    df_train = pd.read_csv(data_path)
+    df_eval = pd.read_csv(eval_path)
 
-        # TODO 4: Khoi tao va huan luyen RandomForestClassifier
-        # Goi y: su dung random_state=42 de dam bao tinh tai tao
-        # model = RandomForestClassifier(...)
-        # model.fit(...)
+    X_train = df_train.drop(columns=["target"])
+    y_train = df_train["target"]
+    X_eval = df_eval.drop(columns=["target"])
+    y_eval = df_eval["target"]
 
-        # TODO 5: Du doan tren tap danh gia va tinh chi so
-        # preds = ...
-        # acc   = accuracy_score(...)
-        # f1    = f1_score(..., average="weighted")
+    with mlflow.start_run(experiment_id=experiment_id):
 
-        # TODO 6: Ghi nhan chi so vao MLflow
-        # mlflow.log_metric("accuracy", ...)
-        # mlflow.log_metric("f1_score", ...)
-        # mlflow.sklearn.log_model(model, "model")
+        mlflow.log_params(params)
 
-        # TODO 7: In ket qua ra man hinh
-        # print(f"Accuracy: {acc:.4f} | F1: {f1:.4f}")
+        model = RandomForestClassifier(**params, random_state=42)
+        model.fit(X_train, y_train)
 
-        # TODO 8: Luu metrics ra file outputs/metrics.json
-        # File nay duoc doc boi GitHub Actions o Buoc 2
-        # os.makedirs("outputs", exist_ok=True)
-        # with open("outputs/metrics.json", "w") as f:
-        #     json.dump({"accuracy": acc, "f1_score": f1}, f)
+        preds = model.predict(X_eval)
+        acc = accuracy_score(y_eval, preds)
+        f1 = f1_score(y_eval, preds, average="weighted")
 
-        # TODO 9: Luu mo hinh ra file models/model.pkl
-        # File nay duoc upload len GCS o Buoc 2
-        # os.makedirs("models", exist_ok=True)
-        # joblib.dump(model, "models/model.pkl")
+        mlflow.log_metric("accuracy", acc)
+        mlflow.log_metric("f1_score", f1)
+        mlflow.sklearn.log_model(model, "model")
 
-        pass  # xoa dong nay sau khi hoan thanh tat ca TODO ben tren
+        print(f"Accuracy: {acc:.4f} | F1: {f1:.4f}")
 
-    # TODO 10: Tra ve acc
-    # return acc
+        os.makedirs("outputs", exist_ok=True)
+        with open("outputs/metrics.json", "w") as f:
+            json.dump({"accuracy": acc, "f1_score": f1}, f)
+
+        os.makedirs("models", exist_ok=True)
+        joblib.dump(model, "models/model.pkl")
+
+    return acc
 
 
 if __name__ == "__main__":
